@@ -3,72 +3,78 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPS 采集器</title>
+    <title>位置采集器</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 </head>
 <body>
-    <button onclick="getLocation()" style="padding: 15px; font-size: 18px;">点击获取坐标</button>
-    
-    <p id="status">等待获取...</p>
+    <h3>位置采集器</h3>
+    <div id="map" style="height: 500px; margin-top: 10px;"></div>
 
     <script>
-        // 这个函数绑定在按钮上
-        function getLocation() {
-            const statusText = document.getElementById("status");
-            statusText.innerHTML = "正在请求 GPS 权限...";
+        // 初始化地图
+        var map = L.map('map').setView([39.9042, 116.4074], 14); // 默认北京坐标
+    
+        // 添加瓦片图层
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
 
-            // 检查浏览器是否支持定位
-            if (navigator.geolocation) {
-                // 请求坐标。如果成功，执行 sendPosition；如果失败，执行 showError
-                navigator.geolocation.getCurrentPosition(sendPosition, showError);
+        var marker = null;
+        var pathLine = null;
+        var pathCoordinates = [];
+        
+        function UpdateLocation(position) {
+            var lat = position.coords.latitude;
+            var lng = position.coords.longitude;
+            console.log('当前位置：', lat, lng);
+            
+            // 添加坐标到路径数组
+            pathCoordinates.push([lat, lng]);
+
+            if (!marker) {
+                // 创建一个新的标记
+                marker = L.marker([lat, lng]).addTo(map).bindPopup('当前位置').openPopup();
+                // 更新地图中心
+                map.setView([lat, lng], 15);
             } else {
-                statusText.innerHTML = "你的浏览器不支持地理定位。";
+                // 更新现有标记的位置
+                marker.setLatLng([lat, lng]);
+            }
+
+            if (!pathLine) {
+                pathLine = L.polyline(pathCoordinates, {color: 'blue'}).addTo(map);
+            } else {
+                pathLine.setLatLngs(pathCoordinates);
             }
         }
 
-        // 获取成功时的回调函数（position 对象里包含了所有的坐标信息）
-        function sendPosition(position) {
-            const lat = position.coords.latitude;
-            const lon = position.coords.longitude;
-            
-            // 1. 在网页上显示出来
-            document.getElementById("status").innerHTML = 
-                "获取成功！<br>纬度: " + lat + "<br>经度: " + lon + "<br>正在发送给后端...";
-
-            // 2. 打包成 JSON，通过 POST 发送给你写好的 Flask 接口
-            fetch('http://127.0.0.1:5000/info', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json' // 告诉服务器，信封里装的是 JSON
-                },
-                body: JSON.stringify({ 
-                    latitude: lat, 
-                    longitude: lon,
-                    timestamp: new Date().toISOString() // 顺便带个时间戳
-                })
-            })
-            .then(response => response.json()) // 接收后端的回复
-            .then(data => {
-                document.getElementById("status").innerHTML += "<br><span style='color:green;'>后端回复: 成功保存！</span>";
-            })
-            .catch(error => {
-                document.getElementById("status").innerHTML += "<br><span style='color:red;'>发送失败，请检查后端报错。</span>" + error;
-            });
-        }
-
-        // 获取失败时的处理逻辑
-        function showError(error) {
-            const statusText = document.getElementById("status");
+        function handleLocationError(error) {
             switch(error.code) {
                 case error.PERMISSION_DENIED:
-                    statusText.innerHTML = "用户拒绝了定位请求。";
+                    console.error("用户拒绝了地理位置请求。");
                     break;
                 case error.POSITION_UNAVAILABLE:
-                    statusText.innerHTML = "位置信息不可用。";
+                    console.error("位置信息不可用。");
                     break;
                 case error.TIMEOUT:
-                    statusText.innerHTML = "请求获取用户位置超时。";
+                    console.error("请求超时。");
+                    break;
+                default:
+                    console.error("发生未知错误。");
                     break;
             }
+
+            alert("无法获取位置信息，请检查浏览器设置并允许位置访问。");
+        }
+
+        if (navigator.geolocation) {
+            navigator.geolocation.watchPosition(UpdateLocation, handleLocationError, {
+                enableHighAccuracy: true,
+                maximumAge: 0
+            });
+        } else {
+            alert("您的浏览器不支持地理位置功能。");
         }
     </script>
 </body>
