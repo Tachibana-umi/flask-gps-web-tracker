@@ -2,8 +2,8 @@
 主要功能：
 1. 提供用户注册 / 登录接口，并使用 session 记录登录状态。
 2. 使用 sqlite 数据库存储用户信息和每个用户的轨迹点。
-3. 登录成功后，跳转到地图页面（前端使用百度地图 JS 追踪位置）。
-4. 前端在采集到位置后，会调用后端 API，把每个点保存到数据库中。
+3. 网站首页直接展示地图页面，右上角弹窗完成登录 / 注册。
+4. 只有在“已登录”的情况下，前端上报的轨迹点才会被保存到数据库。
 """
 
 import os
@@ -128,13 +128,13 @@ def login_required(view_func):
 @app.route("/", methods=["GET"])
 def index():
     """
-    网站首页：显示登录 / 注册页面。
-    如果用户已经登录，则直接跳转到地图页面。
+    网站首页：直接显示地图主页面(静态文件 static/index.html)。
+
+    登录逻辑交给前端在右上角弹窗中处理：
+    - 如果用户已登录：右上角展示用户名，并可以“退出登录”。
+    - 如果用户未登录：右上角按钮可以打开“登录 / 注册”弹窗。
     """
-    if "user_id" in session:
-        return redirect(url_for("map_page"))  #重定向到地图页面
-    # 默认 form_type 设置为 "login"，用于前端控制显示哪个 tab 高亮
-    return render_template("index.html", form_type="login")  
+    return app.send_static_file("index.html")
 
 
 @app.route("/register", methods=["POST"])
@@ -146,16 +146,15 @@ def register():
     3. 把密码加密后存入数据库（不要明文存储密码）。
     4. 如果用户名已存在，则给出错误提示。
     """
-    username = (request.form.get("username") or "").strip()
-    password = request.form.get("password") or ""
+    # 既支持传统表单（request.form），也支持前端 fetch 发送的 JSON。
+    # 优先从 JSON 里取数据，如果没有再从表单取。
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or request.form.get("username") or "").strip()
+    password = data.get("password") or request.form.get("password") or ""
 
     if not username or not password:
-        # 数据校验不通过，重新渲染页面并展示错误信息
-        return render_template(
-            "index.html",
-            error="用户名和密码不能为空。",
-            form_type="register",
-        )
+        # 数据校验不通过，返回 JSON 形式的错误信息
+        return jsonify({"ok": False, "error": "用户名和密码不能为空。"}), 400
 
     db = get_db()
     try:
@@ -166,17 +165,15 @@ def register():
         db.commit()
     except sqlite3.IntegrityError:
         # 违反唯一约束（UNIQUE），说明用户名已经被注册
-        return render_template(
-            "index.html",
-            error="用户名已存在，请换一个。",
-            form_type="register",
-        )
+        return jsonify({"ok": False, "error": "用户名已存在，请换一个。"}), 400
 
     # 注册成功后，不自动登录，而是提示用户去登录
-    return render_template(
-        "index.html",
-        message="注册成功，请使用该账号登录。",
-        form_type="login",
+    return jsonify(
+        {
+            "ok": True,
+            "message": "注册成功，请使用该账号登录。",
+            "username": username,
+        }
     )
 
 
@@ -188,8 +185,10 @@ def login():
     2. 使用 check_password_hash 校验密码是否正确。
     3. 如果正确，则把 user_id 存到 session 中，表示“已登录”。
     """
-    username = (request.form.get("username") or "").strip()
-    password = request.form.get("password") or ""
+    # 同样支持 JSON / 表单两种提交方式
+    data = request.get_json(silent=True) or {}
+    username = (data.get("username") or request.form.get("username") or "").strip()
+    password = data.get("password") or request.form.get("password") or ""
 
     db = get_db()
     user = db.execute(
@@ -198,52 +197,54 @@ def login():
 
     if user is None or not check_password_hash(user["password_hash"], password):
         # 用户不存在，或者密码不匹配
-        return render_template(
-            "index.html",
-            error="用户名或密码错误。",
-            form_type="login",
-        )
+        return jsonify({"ok": False, "error": "用户名或密码错误。"}), 400
 
     # 登录成功，在 session 中记录用户 ID 和用户名
     session["user_id"] = user["id"]
     session["username"] = user["username"]
 
-    # 跳转到地图页面
-    return redirect(url_for("map_page"))
+    # 返回 JSON，前端根据返回结果更新界面（而不是做页面跳转）
+    return jsonify({"ok": True, "username": user["username"]})
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["GET", "POST"])
 def logout():
     """
-    注销登录：清空 session 中保存的用户信息，然后回到登录页。
+    注销登录：清空 session 中保存的用户信息。
+
+    - 当前端通过 fetch 以 POST 方式调用时，返回 JSON。
+    - 若用户在浏览器直接访问 /logout，则重定向回首页。
     """
     session.clear()
+    # 如果是前端 AJAX / fetch 调用，则返回 JSON
+    if request.method == "POST" or request.is_json:
+        return jsonify({"ok": True})
+    # 否则重定向到首页
     return redirect(url_for("index"))
 
 
 @app.route("/map")
-@login_required
 def map_page():
     """
     地图页面路由：
-    - 这里只是做一个简单判断：必须登录后才能访问。
-    - 实际页面由前端静态文件 static/index.html 提供。
+    - 现在首页 "/" 就是地图页面，这个路由只是一个别名。
+    - 不再强制要求登录，在地图右上角由用户决定是否登录。
     """
     return app.send_static_file("index.html")
 
 
 @app.route("/api/location", methods=["POST"])
-@login_required
 def save_location():
     """
     接收前端上传的轨迹点数据，并保存到数据库的 locations 表中。
 
-    前端提交 JSON 数据格式示例：
-    {
-        "latitude": 39.9,
-        "longitude": 116.3
-    }
+    注意：
+    - 只有当用户已登录时（session 里有 user_id），数据才会被保存。
+    - 未登录时返回 401，前端可以选择只在本地画轨迹、不做持久化。
     """
+    # 如果没有登录，返回 401 提示
+    if "user_id" not in session:
+        return jsonify({"error": "未登录，轨迹不会被保存。"}), 401
     data = request.get_json(silent=True) or {}
     latitude = data.get("latitude")
     longitude = data.get("longitude")
@@ -259,7 +260,6 @@ def save_location():
         return jsonify({"error": "经纬度必须是数字。"}), 400
 
     user_id = session.get("user_id")
-
     db = get_db()
     db.execute(
         "INSERT INTO locations (user_id, latitude, longitude) VALUES (?, ?, ?)",
@@ -268,6 +268,25 @@ def save_location():
     db.commit()
 
     return jsonify({"status": "ok"})
+
+
+@app.route("/api/me", methods=["GET"])
+def current_user():
+    """
+    一个小工具接口：让前端知道当前是否已经登录。
+
+    返回示例：
+    - 未登录: {"logged_in": false}
+    - 已登录: {"logged_in": true, "username": "alice"}
+    """
+    if "user_id" in session:
+        return jsonify(
+            {
+                "logged_in": True,
+                "username": session.get("username"),
+            }
+        )
+    return jsonify({"logged_in": False})
 
 
 if __name__ == "__main__":

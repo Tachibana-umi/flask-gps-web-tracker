@@ -6,289 +6,75 @@
     <title>位置采集器(OSM)</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="/style.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     
-    <style>
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-        }
-        body {
-            display: flex;
-            flex-direction: column;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        }
-        #header {
-            background: #1976d2;
-            color: #fff;
-            padding: 10px 16px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            z-index: 1000;
-        }
-        #header-title {
-            font-weight: 600;
-            font-size: 15px;
-        }
-        #controls button {
-            margin-right: 6px;
-            padding: 4px 10px;
-            border-radius: 3px;
-            border: none;
-            cursor: pointer;
-            font-size: 13px;
-        }
-        #btn-start { background: #ffffff; color: #1976d2; }
-        #btn-stop  { background: #e53935; color: #ffffff; }
-        #btn-clear { background: #424242; color: #ffffff; }
-        #btn-stop:disabled { background: #ffcdd2; cursor: not-allowed; }
-        #status {
-            font-size: 13px;
-            opacity: 0.9;
-        }
-        #map {
-            flex: 1;
-        }
-    </style>
 </head>
 <body>
     <div id="header">
-        <div id="header-title">位置采集器(OSM)</div>
-        <div id="controls">
-            <button id="btn-start">开始轨迹</button>
-            <button id="btn-stop" disabled>结束轨迹</button>
-            <button id="btn-clear">清除路径</button>
+        <div id="header-left">
+            <div id="header-title">位置采集器(OSM)</div>
+            <div id="controls">
+                <button id="btn-start">开始轨迹</button>
+                <button id="btn-stop" disabled>结束轨迹</button>
+                <button id="btn-clear">清除路径</button>
+            </div>
+            <span id="status">点击"开始轨迹"开始采集。</span>
         </div>
-        <span id="status">点击"开始轨迹"开始采集。</span>
+        <div id="header-right">
+            <span id="user-label">未登录</span>
+            <button id="btn-open-auth">登录 / 注册</button>
+            <button id="btn-logout" style="display: none;">退出</button>
+        </div>
     </div>
     
     <div id="map"></div>
 
-    <script>
-        // ================= 1. 初始化地图 =================
-        var defaultPoint = [39.915, 116.404];
-        var map = L.map('map').setView(defaultPoint, 15);
+    <!-- 登录 / 注册弹窗：默认隐藏，由 JS 控制显示 / 切换 -->
+    <div id="auth-modal">
+        <div class="auth-card">
+            <button id="auth-close" class="auth-close" type="button">&times;</button>
+            <h2 class="auth-title">账户登录 / 注册</h2>
+            <p class="auth-subtitle">登录后才会把轨迹保存到服务器。</p>
 
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 19,
-            attribution: '© OpenStreetMap'
-        }).addTo(map);
+            <div class="auth-tabs">
+                <div id="auth-tab-login" class="auth-tab active">登录</div>
+                <div id="auth-tab-register" class="auth-tab">注册</div>
+            </div>
 
-        var marker       = null;
-        var pathPolyline = null;
-        var pathPoints   = [];
-        var watchId      = null;
+            <!-- 登录表单 -->
+            <form id="auth-login-form">
+                <div class="auth-field">
+                    <label for="login-username">用户名</label>
+                    <input id="login-username" type="text" name="username" required>
+                </div>
+                <div class="auth-field">
+                    <label for="login-password">密码</label>
+                    <input id="login-password" type="password" name="password" required>
+                </div>
+                <button type="submit" class="auth-submit">登录</button>
+                <div class="auth-hint">还没有账号？点击上方“注册”标签。</div>
+            </form>
 
-        var statusEl = document.getElementById('status');
-        var btnStart = document.getElementById('btn-start');
-        var btnStop  = document.getElementById('btn-stop');
-        var btnClear = document.getElementById('btn-clear');
+            <!-- 注册表单 -->
+            <form id="auth-register-form" style="display: none;">
+                <div class="auth-field">
+                    <label for="register-username">用户名</label>
+                    <input id="register-username" type="text" name="username" required>
+                </div>
+                <div class="auth-field">
+                    <label for="register-password">密码</label>
+                    <input id="register-password" type="password" name="password" required>
+                </div>
+                <button type="submit" class="auth-submit">注册</button>
+                <div class="auth-hint">注册成功后，请使用该账号登录。</div>
+            </form>
 
-        // ================= 2. Kalman 滤波器 =================
-        /**
-         * 一维卡尔曼滤波
-         *   R：测量噪声协方差，越大越平滑（但会滞后），建议 3~10
-         *   Q：过程噪声协方差，越大越跟随真实值，建议 0.1~1
-         */
-        function KalmanFilter(R, Q) {
-            this.R = R || 3;    // 测量噪声
-            this.Q = Q || 0.6;  // 过程噪声
-            this.P = 1;         // 误差协方差
-            this.K = 0;         // 卡尔曼增益
-            this.x = null;      // 当前估计值
-        }
+            <div id="auth-error" class="auth-error"></div>
+            <div id="auth-message" class="auth-message"></div>
+        </div>
+    </div>
 
-        KalmanFilter.prototype.filter = function(measurement) {
-            if (this.x === null) {
-                this.x = measurement;
-                return measurement;
-            }
-            // 预测阶段：误差协方差增加过程噪声
-            this.P = this.P + this.Q;
-            // 更新阶段：融合测量值
-            this.K = this.P / (this.P + this.R);
-            this.x = this.x + this.K * (measurement - this.x);
-            this.P = (1 - this.K) * this.P;
-            return this.x;
-        };
-
-        KalmanFilter.prototype.reset = function() {
-            this.P = 1;
-            this.K = 0;
-            this.x = null;
-        };
-
-        // 对经纬度各自独立滤波
-        var kfLat = new KalmanFilter(5, 0.5);
-        var kfLng = new KalmanFilter(5, 0.5);
-
-        // ================= 3. 速度合理性检查 =================
-        /**
-         * 检测当前点是否为"跳跃点"
-         * 根据与上一有效点之间的距离 / 时间差计算速度，
-         * 超过 MAX_SPEED_MS（默认 10 m/s ≈ 36 km/h）则视为异常点丢弃。
-         */
-        var MAX_SPEED_MS = 10;  // 单位：m/s，可按实际场景调整（步行 ~2、驾车 ~30）
-        var lastValidPoint = null;  // { lat, lng, timestamp }
-
-        function isJumpPoint(lat, lng, timestamp) {
-            if (!lastValidPoint) return false;  // 第一个点，无法判断
-
-            var dist = map.distance(
-                [lastValidPoint.lat, lastValidPoint.lng],
-                [lat, lng]
-            ); // Leaflet 内置，返回米
-            var timeDiff = (timestamp - lastValidPoint.timestamp) / 1000; // 毫秒 → 秒
-
-            if (timeDiff <= 0) return false;  // 时间戳异常时不过滤
-
-            var speed = dist / timeDiff;
-            if (speed > MAX_SPEED_MS) {
-                console.warn('速度异常被过滤：' + Math.round(speed) + ' m/s，距离 ' + Math.round(dist) + ' 米');
-                return true;
-            }
-            return false;
-        }
-
-        // ================= 4. 核心：处理位置更新 =================
-        function updateLocation(position) {
-            var rawLat   = position.coords.latitude;
-            var rawLng   = position.coords.longitude;
-            var accuracy = position.coords.accuracy;
-            var timestamp = position.timestamp || Date.now();
-
-            // ── 第一道过滤：精度过差直接丢弃 ──
-            if (accuracy > 20) {
-                console.log('精度太差被过滤：误差 ' + Math.round(accuracy) + ' 米');
-                return;
-            }
-
-            // ── 第二道过滤：速度检查（跳跃点）──
-            if (isJumpPoint(rawLat, rawLng, timestamp)) {
-                statusEl.textContent = '采集中... 跳跃点已过滤（精度: ' + Math.round(accuracy) + '米）';
-                return;
-            }
-
-            // ── 第三步：Kalman 滤波平滑坐标 ──
-            var smoothLat = kfLat.filter(rawLat);
-            var smoothLng = kfLng.filter(rawLng);
-
-            console.log(
-                '原始:', rawLat.toFixed(6), rawLng.toFixed(6),
-                '→ 平滑后:', smoothLat.toFixed(6), smoothLng.toFixed(6),
-                '精度:', Math.round(accuracy) + 'm'
-            );
-            statusEl.textContent = '采集中... 精度: ' + Math.round(accuracy) + '米';
-
-            // 记录本次有效点（用原始坐标做速度判断，避免滤波后距离失真）
-            lastValidPoint = { lat: rawLat, lng: rawLng, timestamp: timestamp };
-
-            // 使用平滑后的坐标绘图
-            var currentLatLng = [smoothLat, smoothLng];
-            pathPoints.push(currentLatLng);
-
-            // 更新或创建大头针
-            if (!marker) {
-                marker = L.marker(currentLatLng).addTo(map);
-                map.setView(currentLatLng, 17);
-            } else {
-                marker.setLatLng(currentLatLng);
-                map.setView(currentLatLng);
-            }
-
-            // 更新或创建路径折线
-            if (!pathPolyline) {
-                pathPolyline = L.polyline(pathPoints, {
-                    color: '#1976d2',
-                    weight: 5,
-                    opacity: 0.8
-                }).addTo(map);
-            } else {
-                pathPolyline.setLatLngs(pathPoints);
-            }
-
-            // 上报给 Flask 后端（上报平滑后的坐标）
-            fetch('/api/location', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    latitude:  smoothLat,
-                    longitude: smoothLng,
-                    timestamp: new Date(timestamp).toISOString()
-                })
-            }).catch(function(err) {
-                console.error('上报位置信息失败：', err);
-            });
-        }
-
-        // ================= 5. 错误处理与控制按钮 =================
-        function handleLocationError(error) {
-            var msg = "发生未知错误";
-            switch(error.code) {
-                case error.PERMISSION_DENIED:    msg = "用户拒绝了定位请求。"; break;
-                case error.POSITION_UNAVAILABLE: msg = "位置信息不可用。"; break;
-                case error.TIMEOUT:              msg = "获取位置超时。"; break;
-            }
-            console.error(msg, error);
-            statusEl.textContent = msg;
-            stopTracking();
-        }
-
-        function startTracking() {
-            if (!navigator.geolocation) {
-                alert("您的浏览器不支持地理位置。");
-                return;
-            }
-            if (watchId !== null) return;
-
-            statusEl.textContent = '正在请求定位权限...';
-            watchId = navigator.geolocation.watchPosition(updateLocation, handleLocationError, {
-                enableHighAccuracy: true,
-                maximumAge: 0,
-                timeout: 10000
-            });
-
-            btnStart.disabled = true;
-            btnStop.disabled  = false;
-        }
-
-        function stopTracking() {
-            if (watchId !== null) {
-                navigator.geolocation.clearWatch(watchId);
-                watchId = null;
-                statusEl.textContent = '已停止采集。共 ' + pathPoints.length + ' 个有效点。';
-                btnStart.disabled = false;
-                btnStop.disabled  = true;
-            }
-        }
-
-        function clearPath() {
-            pathPoints     = [];
-            lastValidPoint = null;
-            // 重置滤波器状态，避免新轨迹受旧数据影响
-            kfLat.reset();
-            kfLng.reset();
-
-            if (pathPolyline) { map.removeLayer(pathPolyline); pathPolyline = null; }
-            if (marker)       { map.removeLayer(marker);       marker = null;       }
-            statusEl.textContent = '路径已清除。';
-        }
-
-        btnStart.addEventListener('click', startTracking);
-        btnStop.addEventListener('click',  stopTracking);
-        btnClear.addEventListener('click', clearPath);
-
-        // 页面加载时获取一次初始位置作为地图中心
-        if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(function(position) {
-                map.setView([position.coords.latitude, position.coords.longitude], 16);
-            }, function() {
-                console.log("未授权或无法获取初始位置");
-            });
-        }
-    </script>
+    <script src="/script.js"></script>
 </body>
 </html>
