@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>位置采集器(OSM 免费版)</title>
+    <title>位置采集器(OSM)</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -27,7 +27,7 @@
             align-items: center;
             gap: 12px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            z-index: 1000; /* 确保头部在地图上方 */
+            z-index: 1000;
         }
         #header-title {
             font-weight: 600;
@@ -42,7 +42,7 @@
             font-size: 13px;
         }
         #btn-start { background: #ffffff; color: #1976d2; }
-        #btn-stop { background: #e53935; color: #ffffff; }
+        #btn-stop  { background: #e53935; color: #ffffff; }
         #btn-clear { background: #424242; color: #ffffff; }
         #btn-stop:disabled { background: #ffcdd2; cursor: not-allowed; }
         #status {
@@ -62,98 +62,179 @@
             <button id="btn-stop" disabled>结束轨迹</button>
             <button id="btn-clear">清除路径</button>
         </div>
-        <span id="status">点击“开始轨迹”开始采集。</span>
+        <span id="status">点击"开始轨迹"开始采集。</span>
     </div>
     
     <div id="map"></div>
 
     <script>
         // ================= 1. 初始化地图 =================
-        // 默认中心点：北京天安门，缩放级别 15
-        var defaultPoint = [39.915, 116.404]; 
+        var defaultPoint = [39.915, 116.404];
         var map = L.map('map').setView(defaultPoint, 15);
 
-        // 加载 OpenStreetMap 瓦片底图
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
             maxZoom: 19,
             attribution: '© OpenStreetMap'
         }).addTo(map);
 
-        // 全局变量
-        var marker = null;              // 当前定位点标记
-        var pathPolyline = null;        // 路径折线
-        var pathPoints = [];            // 坐标数组，格式: [[lat, lng], [lat, lng]]
-        var watchId = null;             // geolocation 监听 ID
+        var marker       = null;
+        var pathPolyline = null;
+        var pathPoints   = [];
+        var watchId      = null;
 
         var statusEl = document.getElementById('status');
         var btnStart = document.getElementById('btn-start');
-        var btnStop = document.getElementById('btn-stop');
+        var btnStop  = document.getElementById('btn-stop');
         var btnClear = document.getElementById('btn-clear');
 
-        // ================= 2. 核心：处理位置更新 =================
-        function updateLocation(position) {
-            var lat = position.coords.latitude;
-            var lng = position.coords.longitude;
-            var accuracy = position.coords.accuracy; // 精度（单位：米）
+        // ================= 2. Kalman 滤波器 =================
+        /**
+         * 一维卡尔曼滤波
+         *   R：测量噪声协方差，越大越平滑（但会滞后），建议 3~10
+         *   Q：过程噪声协方差，越大越跟随真实值，建议 0.1~1
+         */
+        function KalmanFilter(R, Q) {
+            this.R = R || 3;    // 测量噪声
+            this.Q = Q || 0.6;  // 过程噪声
+            this.P = 1;         // 误差协方差
+            this.K = 0;         // 卡尔曼增益
+            this.x = null;      // 当前估计值
+        }
 
-            //防抖动核心逻辑：丢弃精度太差的“飘移点”
+        KalmanFilter.prototype.filter = function(measurement) {
+            if (this.x === null) {
+                this.x = measurement;
+                return measurement;
+            }
+            // 预测阶段：误差协方差增加过程噪声
+            this.P = this.P + this.Q;
+            // 更新阶段：融合测量值
+            this.K = this.P / (this.P + this.R);
+            this.x = this.x + this.K * (measurement - this.x);
+            this.P = (1 - this.K) * this.P;
+            return this.x;
+        };
+
+        KalmanFilter.prototype.reset = function() {
+            this.P = 1;
+            this.K = 0;
+            this.x = null;
+        };
+
+        // 对经纬度各自独立滤波
+        var kfLat = new KalmanFilter(5, 0.5);
+        var kfLng = new KalmanFilter(5, 0.5);
+
+        // ================= 3. 速度合理性检查 =================
+        /**
+         * 检测当前点是否为"跳跃点"
+         * 根据与上一有效点之间的距离 / 时间差计算速度，
+         * 超过 MAX_SPEED_MS（默认 10 m/s ≈ 36 km/h）则视为异常点丢弃。
+         */
+        var MAX_SPEED_MS = 10;  // 单位：m/s，可按实际场景调整（步行 ~2、驾车 ~30）
+        var lastValidPoint = null;  // { lat, lng, timestamp }
+
+        function isJumpPoint(lat, lng, timestamp) {
+            if (!lastValidPoint) return false;  // 第一个点，无法判断
+
+            var dist = map.distance(
+                [lastValidPoint.lat, lastValidPoint.lng],
+                [lat, lng]
+            ); // Leaflet 内置，返回米
+            var timeDiff = (timestamp - lastValidPoint.timestamp) / 1000; // 毫秒 → 秒
+
+            if (timeDiff <= 0) return false;  // 时间戳异常时不过滤
+
+            var speed = dist / timeDiff;
+            if (speed > MAX_SPEED_MS) {
+                console.warn('速度异常被过滤：' + Math.round(speed) + ' m/s，距离 ' + Math.round(dist) + ' 米');
+                return true;
+            }
+            return false;
+        }
+
+        // ================= 4. 核心：处理位置更新 =================
+        function updateLocation(position) {
+            var rawLat   = position.coords.latitude;
+            var rawLng   = position.coords.longitude;
+            var accuracy = position.coords.accuracy;
+            var timestamp = position.timestamp || Date.now();
+
+            // ── 第一道过滤：精度过差直接丢弃 ──
             if (accuracy > 20) {
-                console.log('精度太差被过滤掉：误差 ' + Math.round(accuracy) + ' 米');
-                return; // 直接退出，不画线也不上报
+                console.log('精度太差被过滤：误差 ' + Math.round(accuracy) + ' 米');
+                return;
             }
 
-            console.log('获取到有效位置(WGS84):', lat, lng, '精度:', accuracy);
+            // ── 第二道过滤：速度检查（跳跃点）──
+            if (isJumpPoint(rawLat, rawLng, timestamp)) {
+                statusEl.textContent = '采集中... 跳跃点已过滤（精度: ' + Math.round(accuracy) + '米）';
+                return;
+            }
+
+            // ── 第三步：Kalman 滤波平滑坐标 ──
+            var smoothLat = kfLat.filter(rawLat);
+            var smoothLng = kfLng.filter(rawLng);
+
+            console.log(
+                '原始:', rawLat.toFixed(6), rawLng.toFixed(6),
+                '→ 平滑后:', smoothLat.toFixed(6), smoothLng.toFixed(6),
+                '精度:', Math.round(accuracy) + 'm'
+            );
             statusEl.textContent = '采集中... 精度: ' + Math.round(accuracy) + '米';
 
-            var currentLatLng = [lat, lng];
-            pathPoints.push(currentLatLng); // 加入路径数组
+            // 记录本次有效点（用原始坐标做速度判断，避免滤波后距离失真）
+            lastValidPoint = { lat: rawLat, lng: rawLng, timestamp: timestamp };
 
-            // 1. 更新或创建大头针
+            // 使用平滑后的坐标绘图
+            var currentLatLng = [smoothLat, smoothLng];
+            pathPoints.push(currentLatLng);
+
+            // 更新或创建大头针
             if (!marker) {
                 marker = L.marker(currentLatLng).addTo(map);
-                map.setView(currentLatLng, 17); // 第一次获取到位置时，放大地图
+                map.setView(currentLatLng, 17);
             } else {
                 marker.setLatLng(currentLatLng);
-                map.setView(currentLatLng); // 让地图中心始终跟随当前点
+                map.setView(currentLatLng);
             }
 
-            // 2. 更新或创建历史轨迹线
+            // 更新或创建路径折线
             if (!pathPolyline) {
                 pathPolyline = L.polyline(pathPoints, {
-                    color: '#1976d2', 
-                    weight: 5, 
+                    color: '#1976d2',
+                    weight: 5,
                     opacity: 0.8
                 }).addTo(map);
             } else {
                 pathPolyline.setLatLngs(pathPoints);
             }
 
-            // 3. 上报给 Flask 后端
+            // 上报给 Flask 后端（上报平滑后的坐标）
             fetch('/api/location', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    latitude: lat,
-                    longitude: lng,
-                    accuracy: accuracy, // 顺便把精度发给后端，以后可能有用
-                    timestamp: new Date().toISOString()
+                    latitude:  smoothLat,
+                    longitude: smoothLng,
+                    timestamp: new Date(timestamp).toISOString()
                 })
-            }).catch(function (err) {
+            }).catch(function(err) {
                 console.error('上报位置信息失败：', err);
             });
         }
 
-        // ================= 3. 错误处理与控制按钮 =================
+        // ================= 5. 错误处理与控制按钮 =================
         function handleLocationError(error) {
             var msg = "发生未知错误";
             switch(error.code) {
-                case error.PERMISSION_DENIED: msg = "用户拒绝了定位请求。"; break;
+                case error.PERMISSION_DENIED:    msg = "用户拒绝了定位请求。"; break;
                 case error.POSITION_UNAVAILABLE: msg = "位置信息不可用。"; break;
-                case error.TIMEOUT: msg = "获取位置超时。"; break;
+                case error.TIMEOUT:              msg = "获取位置超时。"; break;
             }
             console.error(msg, error);
             statusEl.textContent = msg;
-            stopTracking(); // 发生错误自动停止
+            stopTracking();
         }
 
         function startTracking() {
@@ -161,56 +242,51 @@
                 alert("您的浏览器不支持地理位置。");
                 return;
             }
-            if (watchId !== null) return; 
+            if (watchId !== null) return;
 
             statusEl.textContent = '正在请求定位权限...';
-            // HTML5 Geolocation API
             watchId = navigator.geolocation.watchPosition(updateLocation, handleLocationError, {
-                enableHighAccuracy: true, // 强制高精度 GPS
-                maximumAge: 0,            // 不使用缓存的旧位置
-                timeout: 10000            // 10秒超时
+                enableHighAccuracy: true,
+                maximumAge: 0,
+                timeout: 10000
             });
 
             btnStart.disabled = true;
-            btnStop.disabled = false;
+            btnStop.disabled  = false;
         }
 
         function stopTracking() {
             if (watchId !== null) {
                 navigator.geolocation.clearWatch(watchId);
                 watchId = null;
-                statusEl.textContent = '已停止采集。';
+                statusEl.textContent = '已停止采集。共 ' + pathPoints.length + ' 个有效点。';
                 btnStart.disabled = false;
-                btnStop.disabled = true;
+                btnStop.disabled  = true;
             }
         }
 
         function clearPath() {
-            pathPoints = [];
-            if (pathPolyline) {
-                map.removeLayer(pathPolyline); // Leaflet 移除图层的方法
-                pathPolyline = null;
-            }
-            if (marker) {
-                map.removeLayer(marker);
-                marker = null;
-            }
+            pathPoints     = [];
+            lastValidPoint = null;
+            // 重置滤波器状态，避免新轨迹受旧数据影响
+            kfLat.reset();
+            kfLng.reset();
+
+            if (pathPolyline) { map.removeLayer(pathPolyline); pathPolyline = null; }
+            if (marker)       { map.removeLayer(marker);       marker = null;       }
             statusEl.textContent = '路径已清除。';
         }
 
-        // 绑定按钮事件
         btnStart.addEventListener('click', startTracking);
-        btnStop.addEventListener('click', stopTracking);
+        btnStop.addEventListener('click',  stopTracking);
         btnClear.addEventListener('click', clearPath);
 
-        // 页面一加载，尝试获取一次当前位置作为地图中心（不存入历史路径）
+        // 页面加载时获取一次初始位置作为地图中心
         if (navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(function(position){
-                var lat = position.coords.latitude;
-                var lng = position.coords.longitude;
-                map.setView([lat, lng], 16);
-            }, function(){
-                console.log("未授权或无法获取初始位置，使用默认中心点。");
+            navigator.geolocation.getCurrentPosition(function(position) {
+                map.setView([position.coords.latitude, position.coords.longitude], 16);
+            }, function() {
+                console.log("未授权或无法获取初始位置");
             });
         }
     </script>
