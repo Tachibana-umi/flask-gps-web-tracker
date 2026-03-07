@@ -3,79 +3,260 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>位置采集器</title>
-    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
-    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <title>位置采集器（百度地图）</title>
+    <!-- TODO: 把 YOUR_BAIDU_AK_HERE 替换成你的实际百度地图 WebGL JS ak -->
+    <script type="text/javascript" src="https://api.map.baidu.com/api?v=1.0&type=webgl&ak=TOXzCQ7OlODlLfWjj1GBLMLpCOTMHnyW"></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        #header {
+            background: #1976d2;
+            color: #fff;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        #header-title {
+            font-weight: 600;
+            font-size: 15px;
+        }
+        #controls button {
+            margin-right: 6px;
+            padding: 4px 10px;
+            border-radius: 3px;
+            border: none;
+            cursor: pointer;
+            font-size: 13px;
+        }
+        #btn-start {
+            background: #ffffff;
+            color: #1976d2;
+        }
+        #btn-stop {
+            background: #e53935;
+            color: #ffffff;
+        }
+        #btn-clear {
+            background: #424242;
+            color: #ffffff;
+        }
+        #status {
+            font-size: 13px;
+            opacity: 0.9;
+        }
+        #map {
+            flex: 1;
+        }
+    </style>
 </head>
 <body>
-    <h3>位置采集器</h3>
-    <div id="map" style="height: 500px; margin-top: 10px;"></div>
+    <div id="header">
+        <div id="header-title">位置采集器（百度地图）</div>
+        <div id="controls">
+            <button id="btn-start">开始轨迹</button>
+            <button id="btn-stop" disabled>结束轨迹</button>
+            <button id="btn-clear">清除路径</button>
+        </div>
+        <span id="status">点击“开始轨迹”以开始采集。</span>
+    </div>
+    <div id="map"></div>
 
     <script>
-        // 初始化地图
-        var map = L.map('map').setView([39.9042, 116.4074], 14); // 默认北京坐标
-    
-        // 添加瓦片图层
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+        // 初始化百度地图
+        var map = new BMapGL.Map("map");
+        var defaultPoint = new BMapGL.Point(116.404, 39.915); // 默认北京天安门
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(function(position) {
+                var lat = position.coords.latitude;
+                var lng = position.coords.longitude;
+                console.log('初始化时获取当前位置(WGS84):', lat, lng);
+            
+                // 转换为百度坐标系
+                var gpsPoint = new BMapGL.Point(lng, lat);
+                var convertor = new BMapGL.Convertor();
+                convertor.translate([gpsPoint], 1, 5, function(data) {
+                    if (data.status === 0 && data.points && data.points.length) {
+                        var bdPoint = data.points[0];
+                        console.log('转换后的百度坐标：', bdPoint.lng, bdPoint.lat);
+                        defaultPoint = bdPoint; // 更新默认点
+                    }
+                    // 初始化地图
+                    map.centerAndZoom(defaultPoint, 15);
+                    map.enableScrollWheelZoom(true);
+                    map.setMapStyleV2({
+                        styleId: 'bf9d29b0869c05d4ee99dff243b08b3e'
+                    });
+                });
+            }, function(error) {
+                console.error('获取当前位置失败，使用默认位置：', error);
+                // 初始化地图（用默认位置）
+                map.centerAndZoom(defaultPoint, 15);
+                map.enableScrollWheelZoom(true);
+                map.setMapStyleV2({
+                    styleId: 'bf9d29b0869c05d4ee99dff243b08b3e'
+                });
+            }, {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 60000
+            });
+        } else {
+            console.error('浏览器不支持地理位置，使用默认位置');
+            // 初始化地图（用默认位置）
+            map.centerAndZoom(defaultPoint, 15);
+            map.enableScrollWheelZoom(true);
+            map.setMapStyleV2({
+                styleId: 'bf9d29b0869c05d4ee99dff243b08b3e'
+            });
+        }
+        // map.centerAndZoom(defaultPoint, 15);
+        // map.enableScrollWheelZoom(true);    // 启用鼠标滚轮缩放
+        // // 应用自定义地图样式
+        // map.setMapStyleV2({
+        //     styleId: 'bf9d29b0869c05d4ee99dff243b08b3e'
+        // });
 
-        var marker = null;
-        var pathLine = null;
-        var pathCoordinates = [];
-        
-        function UpdateLocation(position) {
+        var marker = null;              // 当前定位点标记
+        var pathPolyline = null;        // 路径折线
+        var pathPoints = [];            // 百度坐标系的点数组
+        var statusEl = document.getElementById('status');   // 状态显示元素
+        var btnStart = document.getElementById('btn-start');    // 开始按钮
+        var btnStop = document.getElementById('btn-stop');  // 结束按钮
+        var btnClear = document.getElementById('btn-clear');// 清除路径按钮
+        var watchId = null;             // geolocation 监听 ID
+
+        function updateLocation(position) {
             var lat = position.coords.latitude;
             var lng = position.coords.longitude;
-            console.log('当前位置：', lat, lng);
-            
-            // 添加坐标到路径数组
-            pathCoordinates.push([lat, lng]);
+            console.log('当前位置(WGS84):', lat, lng);
 
-            if (!marker) {
-                // 创建一个新的标记
-                marker = L.marker([lat, lng]).addTo(map).bindPopup('当前位置').openPopup();
-                // 更新地图中心
-                map.setView([lat, lng], 15);
-            } else {
-                // 更新现有标记的位置
-                marker.setLatLng([lat, lng]);
-            }
+            statusEl.textContent = '已获取定位，绘制路径中...';
 
-            if (!pathLine) {
-                pathLine = L.polyline(pathCoordinates, {color: 'blue'}).addTo(map);
-            } else {
-                pathLine.setLatLngs(pathCoordinates);
-            }
+            // 浏览器地理位置是 WGS84，需要转换为百度坐标系
+            var gpsPoint = new BMapGL.Point(lng, lat);
+            var convertor = new BMapGL.Convertor();
+            convertor.translate([gpsPoint], 1, 5, function (data) {
+                if (data.status !== 0 || !data.points || !data.points.length) {
+                    console.error('坐标转换失败：', data);
+                    return;
+                }
+
+                var bdPoint = data.points[0];
+                console.log('转换后的百度坐标：', bdPoint.lng, bdPoint.lat);
+
+                // 把新点加入路径数组，用于在地图上画出行走轨迹
+                pathPoints.push(bdPoint);
+
+                // 把当前位置显示为一个 Marker，并让地图视图跟随移动
+                if (!marker) {
+                    marker = new BMapGL.Marker(bdPoint);
+                    map.addOverlay(marker);
+                    map.centerAndZoom(bdPoint, 18);
+                } else {
+                    marker.setPosition(bdPoint);
+                }
+
+                // 用折线把所有点连接起来，形成一条路径
+                if (!pathPolyline) {
+                    pathPolyline = new BMapGL.Polyline(pathPoints, {
+                        strokeColor: '#1976d2',
+                        strokeWeight: 5,
+                        strokeOpacity: 0.8
+                    });
+                    map.addOverlay(pathPolyline);
+                } else {
+                    pathPolyline.setPath(pathPoints);
+                }
+
+                // 每次获取新的位置时，把该点通过接口发送给后端保存到数据库
+                fetch('/api/location', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        latitude: bdPoint.lat,
+                        longitude: bdPoint.lng
+                    })
+                }).catch(function (err) {
+                    console.error('上报位置信息失败：', err);
+                });
+            });
         }
 
         function handleLocationError(error) {
+            var msg;
             switch(error.code) {
                 case error.PERMISSION_DENIED:
-                    console.error("用户拒绝了地理位置请求。");
+                    msg = "用户拒绝了地理位置请求。";
                     break;
                 case error.POSITION_UNAVAILABLE:
-                    console.error("位置信息不可用。");
+                    msg = "位置信息不可用。";
                     break;
                 case error.TIMEOUT:
-                    console.error("请求超时。");
+                    msg = "获取位置信息超时。";
                     break;
                 default:
-                    console.error("发生未知错误。");
+                    msg = "获取位置信息时发生未知错误。";
                     break;
             }
-
-            alert("无法获取位置信息，请检查浏览器设置并允许位置访问。");
+            console.error(msg, error);
+            statusEl.textContent = msg;
+            alert(msg + " 请检查浏览器和系统的定位权限设置。");
         }
 
-        if (navigator.geolocation) {
-            navigator.geolocation.watchPosition(UpdateLocation, handleLocationError, {
+        function startTracking() {
+            if (!navigator.geolocation) {
+                var msg = "您的浏览器不支持 HTML5 地理位置功能。";
+                statusEl.textContent = msg;
+                alert(msg);
+                return;
+            }
+            if (watchId !== null) {
+                return; // 已经在跟踪
+            }
+            statusEl.textContent = '正在请求定位权限...';
+            watchId = navigator.geolocation.watchPosition(updateLocation, handleLocationError, {
                 enableHighAccuracy: true,
-                maximumAge: 0
+                maximumAge: 0,
+                timeout: 10000
             });
-        } else {
-            alert("您的浏览器不支持地理位置功能。");
+            btnStart.disabled = true;
+            btnStop.disabled = false;
         }
+
+        function stopTracking() {
+            if (watchId !== null && navigator.geolocation) {
+                navigator.geolocation.clearWatch(watchId);
+                watchId = null;
+                statusEl.textContent = '已停止采集，可重新点击“开始轨迹”。';
+                btnStart.disabled = false;
+                btnStop.disabled = true;
+            }
+        }
+
+        function clearPath() {
+            pathPoints = [];
+            if (pathPolyline) {
+                map.removeOverlay(pathPolyline);
+                pathPolyline = null;
+            }
+            statusEl.textContent = '路径已清除。';
+        }
+
+        btnStart.addEventListener('click', startTracking);
+        btnStop.addEventListener('click', stopTracking);
+        btnClear.addEventListener('click', clearPath);
     </script>
 </body>
 </html>

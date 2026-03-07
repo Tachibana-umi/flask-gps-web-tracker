@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>位置采集器 - 注册 / 登录</title>
+    <!--
+        这个页面是网站的“入口页面”，用于：
+        1. 新用户注册账号
+        2. 已有用户登录
+        登录成功后，后端会跳转到 /map 页面，显示百度地图并开始轨迹采集。
+    -->
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #e3f2fd;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+        }
+        .card {
+            background: #ffffff;
+            width: 100%;
+            max-width: 420px;
+            padding: 24px 24px 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }
+        .title {
+            margin: 0 0 4px;
+            font-size: 20px;
+            font-weight: 600;
+            color: #0d47a1;
+            text-align: center;
+        }
+        .subtitle {
+            margin: 0 0 16px;
+            font-size: 13px;
+            text-align: center;
+            color: #555;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 16px;
+            border-radius: 999px;
+            background: #e3f2fd;
+            padding: 2px;
+        }
+        .tab {
+            flex: 1;
+            text-align: center;
+            padding: 6px 0;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 999px;
+            transition: background 0.15s, color 0.15s;
+        }
+        .tab.active {
+            background: #1976d2;
+            color: #fff;
+            font-weight: 500;
+        }
+        form {
+            margin: 0;
+        }
+        .field {
+            margin-bottom: 12px;
+        }
+        label {
+            display: block;
+            font-size: 13px;
+            margin-bottom: 4px;
+            color: #333;
+        }
+        input[type="text"],
+        input[type="password"] {
+            width: 100%;
+            padding: 8px 10px;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            font-size: 14px;
+        }
+        input[type="text"]:focus,
+        input[type="password"]:focus {
+            border-color: #1976d2;
+            outline: none;
+            box-shadow: 0 0 0 1px rgba(25,118,210,0.15);
+        }
+        .btn-primary {
+            width: 100%;
+            padding: 8px 0;
+            border-radius: 4px;
+            border: none;
+            background: #1976d2;
+            color: #fff;
+            font-size: 15px;
+            cursor: pointer;
+        }
+        .btn-primary:hover {
+            background: #1565c0;
+        }
+        .message {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #2e7d32;
+            text-align: center;
+        }
+        .error {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #c62828;
+            text-align: center;
+        }
+        .hint {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #777;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1 class="title">位置采集器</h1>
+        <p class="subtitle">先注册 / 登录账户，再进入地图页面采集轨迹。</p>
+
+        <!--
+            这里的 tabs 只是前端切换显示“当前是登录模式还是注册模式”，
+            实际提交时，登录表单会发到 /login，注册表单会发到 /register。
+            后端会通过 form_type 变量，决定哪个 tab 处于“激活”状态。
+        -->
+        <div class="tabs">
+            <div id="tab-login" class="tab {% if form_type == 'login' %}active{% endif %}">登录</div>
+            <div id="tab-register" class="tab {% if form_type == 'register' %}active{% endif %}">注册</div>
+        </div>
+
+        <!-- 登录表单 -->
+        <form id="form-login" method="post" action="{{ url_for('login') }}" {% if form_type == 'register' %}style="display:none"{% endif %}>
+            <div class="field">
+                <label for="login-username">用户名</label>
+                <input id="login-username" type="text" name="username" required>
+            </div>
+            <div class="field">
+                <label for="login-password">密码</label>
+                <input id="login-password" type="password" name="password" required>
+            </div>
+            <button type="submit" class="btn-primary">登录并进入地图</button>
+            <div class="hint">还没有账号？点击上方“注册”标签。</div>
+        </form>
+
+        <!-- 注册表单 -->
+        <form id="form-register" method="post" action="{{ url_for('register') }}" {% if form_type != 'register' %}style="display:none"{% endif %}>
+            <div class="field">
+                <label for="register-username">用户名</label>
+                <input id="register-username" type="text" name="username" required>
+            </div>
+            <div class="field">
+                <label for="register-password">密码</label>
+                <input id="register-password" type="password" name="password" required>
+            </div>
+            <button type="submit" class="btn-primary">注册</button>
+            <div class="hint">注册成功后，使用该账号登录即可进入地图。</div>
+        </form>
+
+        {% if error %}
+        <div class="error">{{ error }}</div>
+        {% endif %}
+
+        {% if message %}
+        <div class="message">{{ message }}</div>
+        {% endif %}
+    </div>
+
+    <script>
+        // 这个小脚本用于在前端切换“登录 / 注册”表单的显示，
+        // 不会发起请求，只是控制 display: none。
+        var tabLogin = document.getElementById('tab-login');
+        var tabRegister = document.getElementById('tab-register');
+        var formLogin = document.getElementById('form-login');
+        var formRegister = document.getElementById('form-register');
+
+        tabLogin.addEventListener('click', function () {
+            tabLogin.classList.add('active');
+            tabRegister.classList.remove('active');
+            formLogin.style.display = '';
+            formRegister.style.display = 'none';
+        });
+
+        tabRegister.addEventListener('click', function () {
+            tabRegister.classList.add('active');
+            tabLogin.classList.remove('active');
+            formRegister.style.display = '';
+            formLogin.style.display = 'none';
+        });
+    </script>
+</body>
+</html>
+
