@@ -23,7 +23,6 @@
 - JavaScript
 
 后端：
-- Python
 - Flask
 
 数据库：
