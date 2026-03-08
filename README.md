@@ -74,7 +74,7 @@ python web.py
 由于手机浏览器获取 GPS 权限严格要求 HTTPS 环境，故要使用内网穿透工具将本地 5000 端口映射到公网，下面以ngrok为例:<br>
 
 #### 第一步：注册与下载
-1. 访问 [Ngrok 官网](https://ngrok.com/)，注册一个免费账号。
+1. 访问 <a href="https://ngrok.com/" target="_blank">Ngrok 官网</a>，注册一个免费账号。
 2. 登录后，在 Dashboard 下载对应你操作系统的 Ngrok 客户端（Windows 为 `.zip`，解压后是一个 `ngrok.exe` 文件）。
 
 #### 第二步：配置 AuthToken (身份认证)
