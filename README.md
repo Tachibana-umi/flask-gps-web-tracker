@@ -84,7 +84,7 @@ python web.py
 ```bash
 ngrok config add-authtoken 你的专属Token
 ```
-#### 3.如何使用 (日常启动流程)
+#### 第三步：使用方法 (日常启动流程)
 **前提条件**<br>
 确保你的 Python Flask 服务已经启动，并且正在监听本地的某个端口（以 5000 端口为例）:
 <br>
