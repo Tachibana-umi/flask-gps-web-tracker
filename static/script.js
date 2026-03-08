@@ -12,10 +12,23 @@ var pathPolyline = null;
 var pathPoints   = [];
 var watchId      = null;
 
-var statusEl = document.getElementById('status');
-var btnStart = document.getElementById('btn-start');
-var btnStop  = document.getElementById('btn-stop');
-var btnClear = document.getElementById('btn-clear');
+var statusEl  = document.getElementById('status');
+var btnToggle = document.getElementById('btn-toggle'); 
+var btnClear  = document.getElementById('btn-clear');
+
+// 获取与登录相关的 DOM 元素
+var userLabel      = document.getElementById('user-label');
+var btnOpenAuth    = document.getElementById('btn-open-auth');
+var btnLogout      = document.getElementById('btn-logout');
+var authModal      = document.getElementById('auth-modal');
+var authClose      = document.getElementById('auth-close');
+var tabLogin       = document.getElementById('auth-tab-login');
+var tabRegister    = document.getElementById('auth-tab-register');
+var formLogin      = document.getElementById('auth-login-form');
+var formRegister   = document.getElementById('auth-register-form');
+var authErrorEl    = document.getElementById('auth-error');
+var authMessageEl  = document.getElementById('auth-message');
+
 
 // ================= 2. Kalman 滤波器 =================
 /**
@@ -52,8 +65,8 @@ KalmanFilter.prototype.reset = function() {
 };
 
 // 对经纬度各自独立滤波
-var kfLat = new KalmanFilter(5, 0.5);
-var kfLng = new KalmanFilter(5, 0.5);
+var kfLat = new KalmanFilter(3, 0.5);
+var kfLng = new KalmanFilter(3, 0.5);
 
 // ================= 3. 速度合理性检查 =================
 /**
@@ -77,7 +90,7 @@ function isJumpPoint(lat, lng, timestamp) {
 
   var speed = dist / timeDiff;
   if (speed > MAX_SPEED_MS) {
-    console.warn('速度异常被过滤：' + Math.round(speed) + ' m/s，距离 ' + Math.round(dist) + ' 米');
+    console.warn('速度异常被过滤：' + Math.round(speed) + ' m/s,距离 ' + Math.round(dist) + ' 米');
     return true;
   }
   return false;
@@ -191,8 +204,12 @@ function startTracking() {
     timeout: 10000
   });
 
-  btnStart.disabled = true;
-  btnStop.disabled  = false;
+  // 采集中时，把按钮文字切换为“结束轨迹”
+  if (btnToggle) {
+    btnToggle.textContent = '结束轨迹';
+    btnToggle.style.backgroundColor = '#d32f2f';
+    btnToggle.style.color = '#fff';
+  }
 }
 
 function stopTracking() {
@@ -200,8 +217,21 @@ function stopTracking() {
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
     statusEl.textContent = '已停止采集。共 ' + pathPoints.length + ' 个有效点。';
-    btnStart.disabled = false;
-    btnStop.disabled  = true;
+  }
+  // 停止后，把按钮文字切换回“开始轨迹”
+  if (btnToggle) {
+    btnToggle.textContent = '开始轨迹';
+    btnToggle.style.backgroundColor = '#ffffff';
+    btnToggle.style.color = '#1976d2';
+  }
+}
+
+// 统一的点击事件：根据当前是否在采集，决定“开始”还是“结束”
+function toggleTracking() {
+  if (watchId === null) {
+    startTracking();
+  } else {
+    stopTracking();
   }
 }
 
@@ -217,8 +247,7 @@ function clearPath() {
   statusEl.textContent = '路径已清除。';
 }
 
-btnStart.addEventListener('click', startTracking);
-btnStop.addEventListener('click',  stopTracking);
+btnToggle.addEventListener('click', toggleTracking);
 btnClear.addEventListener('click', clearPath);
 
 // 页面加载时获取一次初始位置作为地图中心
@@ -235,19 +264,6 @@ if (navigator.geolocation) {
 // 1. 在右上角展示“当前登录状态”（未登录 / 已登录：用户名）。
 // 2. 点“登录 / 注册”打开弹窗，在其中完成注册或登录。
 // 3. 登录成功后，轨迹上报接口就会把数据写入数据库。
-
-// 获取与登录相关的 DOM 元素
-var userLabel      = document.getElementById('user-label');
-var btnOpenAuth    = document.getElementById('btn-open-auth');
-var btnLogout      = document.getElementById('btn-logout');
-var authModal      = document.getElementById('auth-modal');
-var authClose      = document.getElementById('auth-close');
-var tabLogin       = document.getElementById('auth-tab-login');
-var tabRegister    = document.getElementById('auth-tab-register');
-var formLogin      = document.getElementById('auth-login-form');
-var formRegister   = document.getElementById('auth-register-form');
-var authErrorEl    = document.getElementById('auth-error');
-var authMessageEl  = document.getElementById('auth-message');
 
 // 切换弹窗中的“登录 / 注册”标签页
 function setAuthTab(type) {

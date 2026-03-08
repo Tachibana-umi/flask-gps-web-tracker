@@ -6,8 +6,9 @@
     <title>位置采集器(OSM)</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/static/style.css">
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
     
 </head>
 <body>
@@ -15,8 +16,8 @@
         <div id="header-left">
             <div id="header-title">位置采集器(OSM)</div>
             <div id="controls">
-                <button id="btn-start">开始轨迹</button>
-                <button id="btn-stop" disabled>结束轨迹</button>
+                <!-- 统一的轨迹开关按钮：未采集时显示“开始轨迹”，采集中显示“结束轨迹” -->
+                <button id="btn-toggle">开始轨迹</button>
                 <button id="btn-clear">清除路径</button>
             </div>
             <span id="status">点击"开始轨迹"开始采集。</span>
@@ -45,12 +46,12 @@
             <!-- 登录表单 -->
             <form id="auth-login-form">
                 <div class="auth-field">
-                    <label for="login-username">用户名</label>
-                    <input id="login-username" type="text" name="username" required>
+                    <input class="form__input" id="login-username" type="text" name="username" required placeholder="">
+                    <label for="login-username" class="form__label">用户名</label>
                 </div>
                 <div class="auth-field">
-                    <label for="login-password">密码</label>
-                    <input id="login-password" type="password" name="password" required>
+                    <input class="form__input" id="login-password" type="password" name="password" required placeholder="">
+                    <label for="login-password" class="form__label">密码</label>
                 </div>
                 <button type="submit" class="auth-submit">登录</button>
                 <div class="auth-hint">还没有账号？点击上方“注册”标签。</div>
@@ -59,12 +60,14 @@
             <!-- 注册表单 -->
             <form id="auth-register-form" style="display: none;">
                 <div class="auth-field">
-                    <label for="register-username">用户名</label>
-                    <input id="register-username" type="text" name="username" required>
+                    
+                    <input class="form__input" id="register-username" type="text" name="username" required placeholder="">
+                    <label for="register-username" class="form__label">用户名</label>
                 </div>
                 <div class="auth-field">
-                    <label for="register-password">密码</label>
-                    <input id="register-password" type="password" name="password" required>
+                    <input class="form__input" id="register-password" type="password" name="password" required placeholder="">
+                    <label for="register-password" class="form__label">密码</label>
+                    
                 </div>
                 <button type="submit" class="auth-submit">注册</button>
                 <div class="auth-hint">注册成功后，请使用该账号登录。</div>
@@ -75,6 +78,6 @@
         </div>
     </div>
 
-    <script src="/script.js"></script>
+    <script src="/static/script.js"></script>
 </body>
 </html>

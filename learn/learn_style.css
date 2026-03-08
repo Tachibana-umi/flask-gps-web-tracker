@@ -9,6 +9,7 @@
 body {
     background-color: #f0f0f0;
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: center;  
     height: 100vh;
@@ -63,3 +64,6 @@ body {
   top: -0.6rem;
   font-size: 0.8rem;
 }
+
+
+
