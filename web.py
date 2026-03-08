@@ -3,11 +3,12 @@
 1. 提供用户注册 / 登录接口，并使用 session 记录登录状态。
 2. 使用 sqlite 数据库存储用户信息和每个用户的轨迹点。
 3. 网站首页直接展示地图页面，右上角弹窗完成登录 / 注册。
-4. 只有在“已登录”的情况下，前端上报的轨迹点才会被保存到数据库。
+4. 在“已登录”的情况下，前端上报的轨迹点会被保存到数据库。
 """
 
 import os
 import sqlite3
+import secrets
 from functools import wraps
 
 from flask import (
@@ -26,8 +27,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # static_folder / template_folder 指定静态文件和模板文件所在的目录
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
-# session 加密用的密钥（生产环境中请改成环境变量，而不是写死在代码里）
-app.secret_key = "dev-secret-key-change-me"
+# session 加密用的密钥
+app.secret_key = secrets.token_hex(32)
 
 # sqlite 数据库文件路径，放在当前项目根目录下
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -45,16 +46,13 @@ def get_db():
         # check_same_thread=False 允许同一个连接在不同线程中使用，
         # 对于简单的开发环境来说够用。
         g.db = sqlite3.connect(DATABASE, check_same_thread=False)
-        # 让查询结果支持通过列名访问，比如 row["username"]
+        # 让查询结果支持通过列名访问
         g.db.row_factory = sqlite3.Row
     return g.db
 
-
+# 每次请求结束时自动调用，关闭数据库连接。
 @app.teardown_appcontext
 def close_db(exception=None):
-    """
-    每次请求结束时自动调用，关闭数据库连接。
-    """
     db = g.pop("db", None)
     if db is not None:
         db.close()
@@ -107,7 +105,7 @@ def login_required(view_func):
     自定义装饰器，用于保护需要登录才能访问的路由。
 
     用法示例：
-    @app.route("/map")
+    @app.route("/")
     @login_required
     def map_page():
         ...
@@ -127,13 +125,7 @@ def login_required(view_func):
 
 @app.route("/", methods=["GET"])
 def index():
-    """
-    网站首页：直接显示地图主页面(静态文件 static/index.html)。
-
-    登录逻辑交给前端在右上角弹窗中处理：
-    - 如果用户已登录：右上角展示用户名，并可以“退出登录”。
-    - 如果用户未登录：右上角按钮可以打开“登录 / 注册”弹窗。
-    """
+    #网站首页：直接显示地图主页面(静态文件 static/index.html)。
     return app.send_static_file("index.html")
 
 
@@ -143,7 +135,7 @@ def register():
     处理注册表单提交：
     1. 从表单中获取用户名和密码。
     2. 校验数据是否为空。
-    3. 把密码加密后存入数据库（不要明文存储密码）。
+    3. 把密码加密后存入数据库。
     4. 如果用户名已存在，则给出错误提示。
     """
     # 既支持传统表单（request.form），也支持前端 fetch 发送的 JSON。
@@ -203,7 +195,7 @@ def login():
     session["user_id"] = user["id"]
     session["username"] = user["username"]
 
-    # 返回 JSON，前端根据返回结果更新界面（而不是做页面跳转）
+    # 返回 JSON，前端根据返回结果更新界面
     return jsonify({"ok": True, "username": user["username"]})
 
 
@@ -213,7 +205,7 @@ def logout():
     注销登录：清空 session 中保存的用户信息。
 
     - 当前端通过 fetch 以 POST 方式调用时，返回 JSON。
-    - 若用户在浏览器直接访问 /logout，则重定向回首页。
+    - 若用户在浏览器直接访问 /logout,则重定向回首页。
     """
     session.clear()
     # 如果是前端 AJAX / fetch 调用，则返回 JSON
@@ -223,24 +215,14 @@ def logout():
     return redirect(url_for("index"))
 
 
-@app.route("/map")
-def map_page():
-    """
-    地图页面路由：
-    - 现在首页 "/" 就是地图页面，这个路由只是一个别名。
-    - 不再强制要求登录，在地图右上角由用户决定是否登录。
-    """
-    return app.send_static_file("index.html")
-
-
 @app.route("/api/location", methods=["POST"])
 def save_location():
     """
     接收前端上传的轨迹点数据，并保存到数据库的 locations 表中。
 
     注意：
-    - 只有当用户已登录时（session 里有 user_id），数据才会被保存。
-    - 未登录时返回 401，前端可以选择只在本地画轨迹、不做持久化。
+    - 只有当用户已登录时(session 里有 user_id),数据才会被保存。
+    - 未登录时返回 401,前端只在本地画轨迹。
     """
     # 如果没有登录，返回 401 提示
     if "user_id" not in session:
@@ -249,10 +231,9 @@ def save_location():
     latitude = data.get("latitude")
     longitude = data.get("longitude")
 
-    # 做一些简单的合法性检查
+    # 简单的合法性检查
     if latitude is None or longitude is None:
         return jsonify({"error": "缺少经纬度参数。"}), 400
-
     try:
         lat = float(latitude)
         lng = float(longitude)
@@ -290,5 +271,4 @@ def current_user():
 
 
 if __name__ == "__main__":
-    # debug=True 方便开发调试，修改代码后会自动重启服务
     app.run(debug=True)

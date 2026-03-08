@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>位置采集器(OSM)</title>
+    <title>位置采集器</title>
     
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="/static/style.css">
@@ -14,19 +14,24 @@
 <body>
     <div id="header">
         <div id="header-left">
-            <div id="header-title">位置采集器(OSM)</div>
+
+            <div id="header-title">位置采集器</div>
+
             <div id="controls">
                 <!-- 统一的轨迹开关按钮：未采集时显示“开始轨迹”，采集中显示“结束轨迹” -->
                 <button id="btn-toggle">开始轨迹</button>
-                <button id="btn-clear">清除路径</button>
+                <button id="btn-clear" style="display: none;">清除路径</button>
             </div>
+
             <span id="status">点击"开始轨迹"开始采集。</span>
         </div>
+
         <div id="header-right">
             <span id="user-label">未登录</span>
             <button id="btn-open-auth">登录 / 注册</button>
             <button id="btn-logout" style="display: none;">退出</button>
         </div>
+
     </div>
     
     <div id="map"></div>
@@ -34,9 +39,12 @@
     <!-- 登录 / 注册弹窗：默认隐藏，由 JS 控制显示 / 切换 -->
     <div id="auth-modal">
         <div class="auth-card">
+
             <button id="auth-close" class="auth-close" type="button">&times;</button>
+
             <h2 class="auth-title">账户登录 / 注册</h2>
-            <p class="auth-subtitle">登录后才会把轨迹保存到服务器。</p>
+
+            <p class="auth-subtitle">登录后轨迹将会保存到服务器。</p>
 
             <div class="auth-tabs">
                 <div id="auth-tab-login" class="auth-tab active">登录</div>
@@ -45,39 +53,51 @@
 
             <!-- 登录表单 -->
             <form id="auth-login-form">
+
                 <div class="auth-field">
-                    <input class="form__input" id="login-username" type="text" name="username" required placeholder="">
+                    <input class="form__input" id="login-username" type="text" name="username" required placeholder=" ">
                     <label for="login-username" class="form__label">用户名</label>
                 </div>
+
                 <div class="auth-field">
-                    <input class="form__input" id="login-password" type="password" name="password" required placeholder="">
+                    <input class="form__input" id="login-password" type="password" name="password" required placeholder=" ">
                     <label for="login-password" class="form__label">密码</label>
                 </div>
+
                 <button type="submit" class="auth-submit">登录</button>
+
                 <div class="auth-hint">还没有账号？点击上方“注册”标签。</div>
+
             </form>
 
             <!-- 注册表单 -->
             <form id="auth-register-form" style="display: none;">
+
                 <div class="auth-field">
-                    
-                    <input class="form__input" id="register-username" type="text" name="username" required placeholder="">
+                    <input class="form__input" id="register-username" type="text" name="username" required placeholder=" ">
                     <label for="register-username" class="form__label">用户名</label>
                 </div>
+
                 <div class="auth-field">
-                    <input class="form__input" id="register-password" type="password" name="password" required placeholder="">
+                    <input class="form__input" id="register-password" type="password" name="password" required placeholder=" ">
                     <label for="register-password" class="form__label">密码</label>
-                    
                 </div>
+
                 <button type="submit" class="auth-submit">注册</button>
+
                 <div class="auth-hint">注册成功后，请使用该账号登录。</div>
+
             </form>
 
             <div id="auth-error" class="auth-error"></div>
+
             <div id="auth-message" class="auth-message"></div>
+
         </div>
     </div>
 
+    <script src="/static/kalman_filter/kalman.min.js"></script>
     <script src="/static/script.js"></script>
+
 </body>
 </html>

@@ -1,22 +1,14 @@
-// ================= 1. 初始化地图 =================
-var defaultPoint = [39.915, 116.404];
-var map = L.map('map').setView(defaultPoint, 15);
-
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  maxZoom: 19,
-  attribution: '© OpenStreetMap'
-}).addTo(map);
-
+// 全局变量定义
 var marker       = null;
 var pathPolyline = null;
 var pathPoints   = [];
-var watchId      = null;
+var watchId      = null;    // Geolocation API 的监听ID
 
-var statusEl  = document.getElementById('status');
-var btnToggle = document.getElementById('btn-toggle'); 
-var btnClear  = document.getElementById('btn-clear');
+var statusEl  = document.getElementById('status');      //显示状态，便于调试、展示信息
+var btnToggle = document.getElementById('btn-toggle');  //登录/注册按钮
+var btnClear  = document.getElementById('btn-clear');   //清除路径按钮
 
-// 获取与登录相关的 DOM 元素
+// 与登录相关的 DOM 元素
 var userLabel      = document.getElementById('user-label');
 var btnOpenAuth    = document.getElementById('btn-open-auth');
 var btnLogout      = document.getElementById('btn-logout');
@@ -30,43 +22,39 @@ var authErrorEl    = document.getElementById('auth-error');
 var authMessageEl  = document.getElementById('auth-message');
 
 
+// ================= 1. 初始化地图 =================
+// 默认中心点（北京天安门），如果用户允许获取位置，后续会自动调整到当前位置
+var defaultPoint = [39.915, 116.404];
+var map = L.map('map').setView(defaultPoint, 15);
+
+// 使用 OpenStreetMap 的免费瓦片服务
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© OpenStreetMap'
+}).addTo(map);
+
+// 页面加载时获取一次初始位置作为地图中心
+if (navigator.geolocation) {
+  navigator.geolocation.getCurrentPosition(function(position) {
+    map.setView([position.coords.latitude, position.coords.longitude], 16);
+  }, function() {
+    console.log("未授权或无法获取初始位置");
+  });
+}
+
 // ================= 2. Kalman 滤波器 =================
 /**
  * 一维卡尔曼滤波
  *   R：测量噪声协方差，越大越平滑（但会滞后），建议 3~10
  *   Q：过程噪声协方差，越大越跟随真实值，建议 0.1~1
+ *   P：误差协方差，越大估计越不可靠，初始值可以设为 1
+ *   K：卡尔曼增益，自动计算，范围 0~1
+ *   x：当前估计值，初始为 null，表示未有有效测量输入
  */
-function KalmanFilter(R, Q) {
-  this.R = R || 3;    // 测量噪声
-  this.Q = Q || 0.6;  // 过程噪声
-  this.P = 1;         // 误差协方差
-  this.K = 0;         // 卡尔曼增益
-  this.x = null;      // 当前估计值
-}
-
-KalmanFilter.prototype.filter = function(measurement) {
-  if (this.x === null) {
-    this.x = measurement;
-    return measurement;
-  }
-  // 预测阶段：误差协方差增加过程噪声
-  this.P = this.P + this.Q;
-  // 更新阶段：融合测量值
-  this.K = this.P / (this.P + this.R);
-  this.x = this.x + this.K * (measurement - this.x);
-  this.P = (1 - this.K) * this.P;
-  return this.x;
-};
-
-KalmanFilter.prototype.reset = function() {
-  this.P = 1;
-  this.K = 0;
-  this.x = null;
-};
 
 // 对经纬度各自独立滤波
-var kfLat = new KalmanFilter(3, 0.5);
-var kfLng = new KalmanFilter(3, 0.5);
+var kfLat = new KalmanFilter({R: 3, Q: 0.6});
+var kfLng = new KalmanFilter({R: 3, Q: 0.6});
 
 // ================= 3. 速度合理性检查 =================
 /**
@@ -83,12 +71,13 @@ function isJumpPoint(lat, lng, timestamp) {
   var dist = map.distance(
     [lastValidPoint.lat, lastValidPoint.lng],
     [lat, lng]
-  ); // Leaflet 内置，返回米
-  var timeDiff = (timestamp - lastValidPoint.timestamp) / 1000; // 毫秒 → 秒
+  ); // Leaflet 内置距离计算，返回单位 米
 
+  var timeDiff = (timestamp - lastValidPoint.timestamp) / 1000; // 毫秒 → 秒
   if (timeDiff <= 0) return false;  // 时间戳异常时不过滤
 
   var speed = dist / timeDiff;
+
   if (speed > MAX_SPEED_MS) {
     console.warn('速度异常被过滤：' + Math.round(speed) + ' m/s,距离 ' + Math.round(dist) + ' 米');
     return true;
@@ -154,7 +143,7 @@ function updateLocation(position) {
   }
 
   // 上报给 Flask 后端（上报平滑后的坐标）
-  // 注意：只有登录后，后端才会真正把数据写入数据库。
+  // 登录后，后端会把数据写入数据库。
   fetch('/api/location', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -164,7 +153,7 @@ function updateLocation(position) {
       timestamp: new Date(timestamp).toISOString()
     })
   }).then(function (res) {
-    // 如果未登录，后端会返回 401，这里简单打印一下日志即可
+    // 如果未登录，后端会返回 401并打印日志
     if (!res.ok) {
       if (res.status === 401) {
         console.log('未登录：轨迹只在本地显示，不会保存到服务器。');
@@ -178,6 +167,10 @@ function updateLocation(position) {
 }
 
 // ================= 5. 错误处理与控制按钮 =================
+
+btnToggle.addEventListener('click', toggleTracking);
+btnClear.addEventListener('click', clearPath);
+
 function handleLocationError(error) {
   var msg = "发生未知错误";
   switch(error.code) {
@@ -199,8 +192,8 @@ function startTracking() {
 
   statusEl.textContent = '正在请求定位权限...';
   watchId = navigator.geolocation.watchPosition(updateLocation, handleLocationError, {
-    enableHighAccuracy: true,
-    maximumAge: 0,
+    enableHighAccuracy: true,         //高精度模式
+    maximumAge: 0,                    //不使用缓存位置，确保每次都是最新数据
     timeout: 10000
   });
 
@@ -209,6 +202,7 @@ function startTracking() {
     btnToggle.textContent = '结束轨迹';
     btnToggle.style.backgroundColor = '#d32f2f';
     btnToggle.style.color = '#fff';
+    btnClear.style.display = '';
   }
 }
 
@@ -223,6 +217,7 @@ function stopTracking() {
     btnToggle.textContent = '开始轨迹';
     btnToggle.style.backgroundColor = '#ffffff';
     btnToggle.style.color = '#1976d2';
+    btnClear.style.display = 'none';
   }
 }
 
@@ -239,31 +234,28 @@ function clearPath() {
   pathPoints     = [];
   lastValidPoint = null;
   // 重置滤波器状态，避免新轨迹受旧数据影响
-  kfLat.reset();
-  kfLng.reset();
+  kfLat.x = NaN;
+  kfLat.cov = NaN;
+  kfLng.x = NaN;
+  kfLng.cov = NaN;
 
   if (pathPolyline) { map.removeLayer(pathPolyline); pathPolyline = null; }
-  if (marker)       { map.removeLayer(marker);       marker = null;       }
+  //if (marker)       { map.removeLayer(marker);       marker = null;       }
   statusEl.textContent = '路径已清除。';
 }
 
-btnToggle.addEventListener('click', toggleTracking);
-btnClear.addEventListener('click', clearPath);
-
-// 页面加载时获取一次初始位置作为地图中心
-if (navigator.geolocation) {
-  navigator.geolocation.getCurrentPosition(function(position) {
-    map.setView([position.coords.latitude, position.coords.longitude], 16);
-  }, function() {
-    console.log("未授权或无法获取初始位置");
-  });
-}
 
 // ================= 6. 登录 / 注册弹窗与后端交互 =================
 // 这一部分代码实现：
 // 1. 在右上角展示“当前登录状态”（未登录 / 已登录：用户名）。
 // 2. 点“登录 / 注册”打开弹窗，在其中完成注册或登录。
 // 3. 登录成功后，轨迹上报接口就会把数据写入数据库。
+
+// 注册事件监听
+tabLogin.addEventListener('click', function () { setAuthTab('login'); });
+tabRegister.addEventListener('click', function () { setAuthTab('register'); });
+btnOpenAuth.addEventListener('click', function () { openAuthModal('login'); });
+authClose.addEventListener('click', function () { closeAuthModal(); });
 
 // 切换弹窗中的“登录 / 注册”标签页
 function setAuthTab(type) {
@@ -282,6 +274,7 @@ function setAuthTab(type) {
   authMessageEl.textContent = '';
 }
 
+// 打开登录/注册弹窗，默认显示登录页
 function openAuthModal(defaultTab) {
   setAuthTab(defaultTab || 'login');
   authModal.classList.add('active');
@@ -300,10 +293,12 @@ function refreshUserInfo() {
   .then(function (data) {
     if (data.logged_in) {
       userLabel.textContent = '已登录：' + data.username;
-      btnOpenAuth.textContent = '切换账号';
+      btnOpenAuth.style.display = 'none';
+      //btnOpenAuth.textContent = '切换账号';
       btnLogout.style.display = '';
     } else {
       userLabel.textContent = '未登录';
+      btnOpenAuth.style.display = '';
       btnOpenAuth.textContent = '登录 / 注册';
       btnLogout.style.display = 'none';
     }
@@ -312,18 +307,6 @@ function refreshUserInfo() {
     console.error('获取登录状态失败：', err);
   });
 }
-
-// 注册事件监听
-tabLogin.addEventListener('click', function () { setAuthTab('login'); });
-tabRegister.addEventListener('click', function () { setAuthTab('register'); });
-
-btnOpenAuth.addEventListener('click', function () {
-    openAuthModal('login');
-});
-
-authClose.addEventListener('click', function () {
-    closeAuthModal();
-});
 
 // 登录表单提交事件：调用后端 /login 接口
 formLogin.addEventListener('submit', function (event) {
@@ -352,7 +335,7 @@ formLogin.addEventListener('submit', function (event) {
     authErrorEl.textContent = '';
     refreshUserInfo();
     // 短暂延迟后关闭弹窗
-    setTimeout(closeAuthModal, 800);
+    setTimeout(closeAuthModal, 1000);
   })
   .catch(function (err) {
     console.error('登录请求失败：', err);
