@@ -100,9 +100,9 @@ Version                       3.x.x
 Region                        United States (us)
 Forwarding                    [https://xxxx-xxxx.ngrok-free.app](https://xxxx-xxxx.ngrok-free.app) -> http://localhost:5000
 ```
-`https://xxxx-xxxx.ngrok-free.app`就是你的公网地址。随后通过移动设备的浏览器访问即可 
+`https://xxxx-xxxx.ngrok-free.app`就是你的公网地址，随后通过移动设备的浏览器访问即可 
 
-*建议使用谷歌浏览器*
+*（建议使用谷歌浏览器）*
 
 
 
@@ -112,7 +112,5 @@ Forwarding                    [https://xxxx-xxxx.ngrok-free.app](https://xxxx-xx
 - 单次轨迹快速导出为 GPX / CSV 文件
 - 接口速率限制，防止恶意频繁调用
 - 断网时将失败数据暂存至 localStorage / IndexedDB，网络恢复后自动重传
-- 每个网络请求均有 Loading 状态反馈
-- 配置 HTTPS
 - 按时间段筛选轨迹
 - 前端 PWA 化，支持添加到手机桌面并在弱网环境下正常使用
