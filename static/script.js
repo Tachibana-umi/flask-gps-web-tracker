@@ -3,6 +3,7 @@ var marker       = null;
 var pathPolyline = null;
 var pathPoints   = [];
 var watchId      = null;    // Geolocation API 的监听ID
+var wakeLock     = null;    // Wake Lock API 的锁对象
 
 var statusEl  = document.getElementById('status');      //显示状态，便于调试、展示信息
 var btnToggle = document.getElementById('btn-toggle');  //登录/注册按钮
@@ -196,6 +197,8 @@ function startTracking() {
     maximumAge: 0,                    //不使用缓存位置，确保每次都是最新数据
     timeout: 10000
   });
+  // 请求 Wake Lock，保持屏幕常亮
+  requestWakeLock();
 
   // 采集中时，把按钮文字切换为“结束轨迹”
   if (btnToggle) {
@@ -211,8 +214,11 @@ function stopTracking() {
     navigator.geolocation.clearWatch(watchId);
     watchId = null;
     statusEl.textContent = '已停止采集。共 ' + pathPoints.length + ' 个有效点。';
-  }
-  // 停止后，把按钮文字切换回“开始轨迹”
+  }  
+  // 释放 Wake Lock（允许屏幕熄灭）
+  releaseWakeLock();
+  
+    // 停止后，把按钮文字切换回“开始轨迹”
   if (btnToggle) {
     btnToggle.textContent = '开始轨迹';
     btnToggle.style.backgroundColor = '#ffffff';
@@ -243,6 +249,57 @@ function clearPath() {
   //if (marker)       { map.removeLayer(marker);       marker = null;       }
   statusEl.textContent = '路径已清除。';
 }
+
+// ================= Wake Lock API 相关函数 =================
+/**
+ * 请求 Wake Lock（保持屏幕常亮）
+ * 用途：防止手机在采集轨迹时熄屏，导致 GPS 更新暂停
+ */
+function requestWakeLock() {
+  // 检查浏览器是否支持 Wake Lock API
+  if (!('wakeLock' in navigator)) {
+    console.warn('当前浏览器不支持 Wake Lock API,建议使用 Chrome/Edge/Safari 最新版本。');
+    alert('提示：您的浏览器可能不支持屏幕常亮功能。\n\n为确保轨迹采集不中断,请手动保持屏幕亮着(我知道这很蠢...),或在系统设置中延长息屏时间。');
+    return;
+  }
+
+  // 请求屏幕唤醒锁
+  navigator.wakeLock.request('screen').then(function(lock) {
+    wakeLock = lock;
+    console.log('Wake Lock 激活成功：屏幕将保持常亮，直到结束采集。');
+    
+    // 监听锁被释放的事件（如用户手动切换应用）
+    wakeLock.addEventListener('release', function() {
+      console.log('Wake Lock 已释放（可能因切换应用或系统限制）');
+    });
+  }).catch(function(err) {
+    console.error('Wake Lock 请求失败：', err.name, err.message);
+    alert('无法保持屏幕常亮，请手动保持屏幕亮着以确保轨迹采集正常。');
+  });
+}
+
+/**
+ * 释放 Wake Lock（允许屏幕熄灭）
+ */
+function releaseWakeLock() {
+  if (wakeLock !== null) {
+    wakeLock.release().then(function() {
+      console.log('Wake Lock 已释放：屏幕可以正常熄灭。');
+      wakeLock = null;
+    }).catch(function(err) {
+      console.error('释放 Wake Lock 失败：', err);
+    });
+  }
+}
+
+// 监听页面可见性变化（如切换到后台）
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible' && watchId !== null && wakeLock === null) {
+    // 页面重新可见且正在采集，重新请求 Wake Lock
+    console.log('页面重新可见，尝试恢复 Wake Lock...');
+    requestWakeLock();
+  }
+});
 
 
 // ================= 6. 登录 / 注册弹窗与后端交互 =================
