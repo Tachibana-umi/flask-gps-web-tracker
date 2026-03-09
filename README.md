@@ -114,3 +114,4 @@ Forwarding                    [https://xxxx-xxxx.ngrok-free.app](https://xxxx-xx
 - 断网时将失败数据暂存至 localStorage / IndexedDB，网络恢复后自动重传
 - 按时间段筛选轨迹
 - 前端 PWA 化，支持添加到手机桌面并在弱网环境下正常使用
+- 尝试vue等成熟的前端框架
