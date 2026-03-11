@@ -118,3 +118,14 @@ Forwarding                    [https://xxxx-xxxx.ngrok-free.app](https://xxxx-xx
 - [ ] 按时间段筛选轨迹
 - [ ]  PWA 化，支持添加到手机桌面并在弱网环境下正常使用
 - [ ] 尝试vue等成熟的前端框架
+
+
+## 依赖项目
+
+本项目中的卡尔曼滤波实现参考并使用了以下开源项目:
+
+kalmanjs  
+https://github.com/wouterbulten/kalmanjs
+
+作者：Wouter Bulten  
+协议：MIT License
